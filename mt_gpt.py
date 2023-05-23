@@ -3,27 +3,28 @@ from tensorflow import keras
 from keras.layers import TextVectorization
 import numpy as np
 import random
-import pathlib
 
-from model import create_gpt_model
+from gpt import create_gpt_model
 
 
-text_file = keras.utils.get_file(
-    fname="spa-eng.zip",
-    origin="http://storage.googleapis.com/download.tensorflow.org/data/spa-eng.zip",
-    extract=True,
-)
-text_file = pathlib.Path(text_file).parent / "spa-eng" / "spa.txt"
+train_fn = "train-eng-spa.tsv"
 
-with open(text_file, encoding="utf-8") as f:
-    lines = f.read().split("\n")[:-1]
-bitexts = []
-for line in lines:
-    eng, spa = line.split("\t")
-    bitext = "[start] " + eng + " [to] " + spa + " [end]"
-    bitexts.append(bitext)
+train_pairs = []
+with open(train_fn, encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        train_pairs.append(line.split("\t"))
 
-print("# of bitexts:", len(bitexts))
+
+def process_pair(p):
+    return "[start] " + p[0] + " [to] " + p[1] + " [end]"
+
+
+def to_prompt(src):
+    return "[start] " + src + " [to] "
+
+
+bitexts = list(map(process_pair, train_pairs))
 
 for _ in range(5):
     print(random.choice(bitexts))
@@ -126,13 +127,54 @@ class TextGenerator(keras.callbacks.Callback):
             else:
                 x = start_tokens
             x = np.array([x])
-            y, _ = self.model.predict(x)
+            y = self.model.predict(x)
             sample_token = self.sample_from(y[0][sample_index])
             tokens_generated.append(sample_token)
             start_tokens.append(sample_token)
             num_tokens_generated = len(tokens_generated)
         txt = " ".join([self.detokenize(_) for _ in self.start_tokens + tokens_generated])
         print(f"generated text:\n{txt}\n")
+
+
+class Generator:
+    def __init__(self, model, max_tokens, index_to_word, top_k=10):
+        self.model = model
+        self.max_tokens = max_tokens
+        self.index_to_word = index_to_word
+        self.k = top_k
+
+    def sample_from(self, logits):
+        logits, indices = tf.math.top_k(logits, k=self.k, sorted=True)
+        indices = np.asarray(indices).astype("int32")
+        preds = keras.activations.softmax(tf.expand_dims(logits, 0))[0]
+        preds = np.asarray(preds).astype("float32")
+        return np.random.choice(indices, p=preds)
+
+    def detokenize(self, number):
+        return self.index_to_word[number]
+
+    def generate(self, start_tokens):
+        start_tokens = [_ for _ in start_tokens]
+        num_tokens_generated = 0
+        tokens_generated = []
+        while num_tokens_generated <= self.max_tokens:
+            pad_len = maxlen - len(start_tokens)
+            sample_index = len(start_tokens) - 1
+            if pad_len < 0:
+                x = start_tokens[:maxlen]
+                sample_index = maxlen - 1
+            elif pad_len > 0:
+                x = start_tokens + [0] * pad_len
+            else:
+                x = start_tokens
+            x = np.array([x])
+            y = self.model.predict(x)
+            sample_token = self.sample_from(y[0][sample_index])
+            tokens_generated.append(sample_token)
+            start_tokens.append(sample_token)
+            num_tokens_generated = len(tokens_generated)
+        txt = " ".join([self.detokenize(_) for _ in tokens_generated])
+        return txt
 
 
 # Tokenize starting prompt
@@ -150,4 +192,20 @@ print(model.summary())
 
 print("Training...")
 
-model.fit(text_ds, verbose=1, epochs=25, callbacks=[text_gen_callback])
+model.fit(text_ds, verbose=1, epochs=1, callbacks=[text_gen_callback])
+
+weights_file = "gpt.h5"
+model.save_weights(weights_file)
+
+generator = Generator(model, 40, vocab)
+
+
+def translate(src):
+    start_prompt = to_prompt(src)
+    start_tokens = [word_to_index.get(_, 1) for _ in start_prompt.split()]
+    trans = generator.generate(start_tokens)
+    print(trans)
+
+
+translate("this is a book.")
+
