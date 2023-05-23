@@ -69,12 +69,9 @@ def create_gpt_model(embed_dim, num_heads, feed_forward_dim, vocab_size, maxlen)
     transformer_block = TransformerBlock(embed_dim, num_heads, feed_forward_dim)
     x = transformer_block(x)
     outputs = layers.Dense(vocab_size)(x)
-    model = keras.Model(inputs=inputs, outputs=[outputs, x])
+    model = keras.Model(inputs=inputs, outputs=outputs)
 
     loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-    model.compile(
-        "adam",
-        loss=[loss_fn, None],
-    )  # No loss and optimization based on word embeddings from transformer block
+    model.compile("adam", loss=loss_fn)
 
     return model
