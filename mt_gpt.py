@@ -16,12 +16,17 @@ with open(train_fn, encoding="utf-8") as f:
         train_pairs.append(line.split("\t"))
 
 
-def process_pair(p):
-    return "[start] " + p[0] + " [to] " + p[1] + " [end]"
+START_TOKEN = "[start]"
+END_TOKEN = "[end]"
+TO_TOKEN = "[to]"
 
 
 def to_prompt(src):
-    return "[start] " + src + " [to] "
+    return START_TOKEN + " " + src + " " + TO_TOKEN + " "
+
+
+def process_pair(p):
+    return to_prompt(p[0]) + p[1] + " " + END_TOKEN
 
 
 bitexts = list(map(process_pair, train_pairs))
@@ -75,6 +80,14 @@ def prepare_lm_inputs_labels(text):
 
 text_ds = text_ds.map(prepare_lm_inputs_labels, num_parallel_calls=tf.data.AUTOTUNE)
 text_ds = text_ds.prefetch(tf.data.AUTOTUNE)
+
+
+word_to_index = {}
+for index, word in enumerate(vocab):
+    word_to_index[word] = index
+
+
+END_ID = word_to_index[END_TOKEN]
 
 
 class TextGenerator(keras.callbacks.Callback):
@@ -170,6 +183,8 @@ class Generator:
             x = np.array([x])
             y = self.model.predict(x)
             sample_token = self.sample_from(y[0][sample_index])
+            if sample_token == END_ID:
+                break
             tokens_generated.append(sample_token)
             start_tokens.append(sample_token)
             num_tokens_generated = len(tokens_generated)
@@ -177,12 +192,7 @@ class Generator:
         return txt
 
 
-# Tokenize starting prompt
-word_to_index = {}
-for index, word in enumerate(vocab):
-    word_to_index[word] = index
-
-start_prompt = "[start] this is a book. [to] "
+start_prompt = to_prompt("this is a book.")
 start_tokens = [word_to_index.get(_, 1) for _ in start_prompt.split()]
 num_tokens_generated = 40
 text_gen_callback = TextGenerator(num_tokens_generated, start_tokens, vocab)
