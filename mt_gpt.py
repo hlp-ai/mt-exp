@@ -214,8 +214,29 @@ def translate(src):
     start_prompt = to_prompt(src)
     start_tokens = [word_to_index.get(_, 1) for _ in start_prompt.split()]
     trans = generator.generate(start_tokens)
-    print(trans)
+
+    return trans
 
 
-translate("this is a book.")
+def eval_file(tsv_fn):
+    srcs = []
+    refs = []
+    with open(tsv_fn, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            pair = line.split("\t")
+            srcs.append(pair[0])
+            refs.append(pair[1])
 
+    translations = []
+    for src in srcs:
+        trans = translate(src)
+        translations.append(trans)
+
+    import sacrebleu
+
+    bleu = sacrebleu.corpus_bleu(translations, [refs])
+    print(bleu.score)
+
+
+eval_file("test-eng-spa.tsv")
